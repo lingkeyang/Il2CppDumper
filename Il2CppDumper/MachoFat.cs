@@ -6,9 +6,9 @@ using System.Text;
 
 namespace Il2CppDumper
 {
-    class MachoFat : MyBinaryReader
+    public sealed class MachoFat : MyBinaryReader
     {
-        private Fat[] fats;
+        public Fat[] fats;
 
         public MachoFat(Stream stream) : base(stream)
         {
@@ -20,26 +20,21 @@ namespace Il2CppDumper
             {
                 Position += 8;
                 fats[i] = new Fat();
-                fats[i].file_offset = BitConverter.ToUInt32(ReadBytes(4).Reverse().ToArray(), 0);
+                fats[i].offset = BitConverter.ToUInt32(ReadBytes(4).Reverse().ToArray(), 0);
                 fats[i].size = BitConverter.ToUInt32(ReadBytes(4).Reverse().ToArray(), 0);
                 Position += 4;
             }
             for (var i = 0; i < size; i++)
             {
-                Position = fats[i].file_offset;
+                Position = fats[i].offset;
                 fats[i].magic = ReadUInt32();
             }
         }
 
-        public byte[] GetFirstMacho()
+        public byte[] GetMacho(int index)
         {
-            Position = fats[0].file_offset;
-            return ReadBytes((int)fats[0].size);
-        }
-
-        public uint GetFirstMachoMagic()
-        {
-            return fats[0].magic;
+            Position = fats[index].offset;
+            return ReadBytes((int)fats[index].size);
         }
     }
 }

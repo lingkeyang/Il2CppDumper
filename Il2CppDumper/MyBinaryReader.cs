@@ -1,24 +1,55 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 
 namespace Il2CppDumper
 {
-    class MyBinaryReader : BinaryReader
+    public class MyBinaryReader : BinaryReader
     {
-        public MyBinaryReader(Stream stream) : base(stream) { }
+        public float version;
+        protected bool is32Bit;
+        private MethodInfo readClass;
+
+
+        public MyBinaryReader(Stream stream) : base(stream)
+        {
+            readClass = GetType().GetMethod("ReadClass", Type.EmptyTypes);
+        }
+
+        private object ReadPrimitive(Type type)
+        {
+            var typename = type.Name;
+            switch (typename)
+            {
+                case "Int32":
+                    return ReadInt32();
+                case "UInt32":
+                    return ReadUInt32();
+                case "Int16":
+                    return ReadInt16();
+                case "UInt16":
+                    return ReadUInt16();
+                case "Byte":
+                    return ReadByte();
+                case "Int64" when is32Bit:
+                    return ReadInt32();
+                case "Int64":
+                    return ReadInt64();
+                case "UInt64" when is32Bit:
+                    return ReadUInt32();
+                case "UInt64":
+                    return ReadUInt64();
+                default:
+                    return null;
+            }
+        }
 
         public dynamic Position
         {
-            get
-            {
-                return BaseStream.Position;
-            }
-            set
-            {
-                BaseStream.Position = (long)value;
-            }
+            get => BaseStream.Position;
+            set => BaseStream.Position = (long)value;
         }
 
         public T ReadClass<T>(dynamic addr) where T : new()
@@ -32,81 +63,49 @@ namespace Il2CppDumper
             var type = typeof(T);
             if (type.IsPrimitive)
             {
-                if (type == typeof(int))
-                {
-                    return (T)(object)ReadInt32();
-                }
-                else if (type == typeof(uint))
-                {
-                    return (T)(object)ReadUInt32();
-                }
-                else if (type == typeof(long))
-                {
-                    return (T)(object)ReadInt64();
-                }
-                else if (type == typeof(ulong))
-                {
-                    return (T)(object)ReadUInt64();
-                }
-                else
-                {
-                    return default(T);
-                }
+                return (T)ReadPrimitive(type);
             }
             else
             {
                 var t = new T();
                 foreach (var i in t.GetType().GetFields())
                 {
-                    if (i.FieldType == typeof(int))
+                    var attr = (VersionAttribute)Attribute.GetCustomAttribute(i, typeof(VersionAttribute));
+                    if (attr != null)
                     {
-                        i.SetValue(t, ReadInt32());
+                        if (version < attr.Min || version > attr.Max)
+                            continue;
                     }
-                    else if (i.FieldType == typeof(uint))
+                    if (i.FieldType.IsPrimitive)
                     {
-                        i.SetValue(t, ReadUInt32());
-                    }
-                    else if (i.FieldType == typeof(short))
-                    {
-                        i.SetValue(t, ReadInt16());
-                    }
-                    else if (i.FieldType == typeof(ushort))
-                    {
-                        i.SetValue(t, ReadUInt16());
-                    }
-                    else if (i.FieldType == typeof(byte))
-                    {
-                        i.SetValue(t, ReadByte());
-                    }
-                    else if (i.FieldType == typeof(long))
-                    {
-                        i.SetValue(t, ReadInt64());
-                    }
-                    else if (i.FieldType == typeof(ulong))
-                    {
-                        i.SetValue(t, ReadUInt64());
+                        i.SetValue(t, ReadPrimitive(i.FieldType));
                     }
                     else
                     {
-                        var mi = GetType().GetMethod("ReadClass", Type.EmptyTypes);
-                        var mi2 = mi.MakeGenericMethod(i.FieldType);
-                        var o = mi2.Invoke(this, null);
+                        var gm = readClass.MakeGenericMethod(i.FieldType);
+                        var o = gm.Invoke(this, null);
                         i.SetValue(t, o);
+                        break;
                     }
                 }
                 return t;
             }
         }
 
-        public T[] ReadClassArray<T>(dynamic addr, long count) where T : new()
+        public T[] ReadClassArray<T>(long count) where T : new()
         {
-            Position = addr;
             var t = new T[count];
             for (var i = 0; i < count; i++)
             {
                 t[i] = ReadClass<T>();
             }
             return t;
+        }
+
+        public T[] ReadClassArray<T>(dynamic addr, long count) where T : new()
+        {
+            Position = addr;
+            return ReadClassArray<T>(count);
         }
 
         public string ReadStringToNull(dynamic addr)
